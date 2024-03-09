@@ -15,7 +15,9 @@ Canon {
 			// add numVoices * Voice to voices dictionary, with count i as key;
 			// each Voice gets the seed's notepat transposed by corresponding interval given in map (default: 0)
 			// each Voice gets the seed's durpat multiplied by corresponding multiplier given in map (default: 1)
-			voices.put(i, Voice(seed.notepat + map.intervals.wrapAt(i), seed.durpat * map.dur_multipliers[i]))
+
+			// the problem is in the creation of each Voice I'm trying to make a Pseq, but not feeding it a collection ...
+			voices.put(i, Voice(seed.notepat.asStream.eventsArray + map.intervals.wrapAt(i), seed.durpat.asStream.eventsArray * map.dur_multipliers[i]));
 		});
 
 		^super.newCopyArgs(seed, map, voices, midiout, repeats) // voices are therefore constructed when the Canon is initialised
@@ -119,9 +121,65 @@ Canon {
 	// could add a flag to map to indicate midi or not ... in which case get_stream produces midi stream
 
 	play {
-		arg tempo=60, instrument;
+		arg clock=TempoClock(1), instrument, quant=Quant(0);
 		// this will simply play the stream at given bpm (default 60bpm)
-		this.get_stream.asEventStreamPlayer.play(TempoClock(tempo / 60))
+		this.get_stream.asEventStreamPlayer.play(clock, quant: quant)
+	}
+
+	get_midi {
+		arg filepath, tempo=60, timeSignature="4/4";
+		var file, pattern, sorted_voices=[];
+
+		file = SimpleMIDIFile(filepath);
+		file.init1(this.voices.size + 1, tempo, timeSignature);
+
+		file.timeMode = \seconds;
+
+		this.voices.size.do({
+			arg i;
+			sorted_voices = sorted_voices.add(this.voices[i]);
+		});
+
+		// voices is a dict, and not sorted ...
+		sorted_voices.do({
+			arg voice, track;
+			var notes, durs, onsets=[map.deltavals[track]];
+			// get notes
+			notes = voice.notepat.asStream.eventsArray;
+			// get durs
+			if (
+				voice.durpat.isKindOf(Number),
+				{
+					durs = notes.size.collect({
+						voice.durpat;
+					})
+				},
+				{
+					durs = voice.durpat.asStream.eventsArray;
+				}
+			);
+			// get onsets
+			durs.do({
+				arg dur, i;
+				onsets = onsets.add(onsets[i] + dur);
+			});
+			// remove the last onset (which is end of final note)
+
+			notes.postln;
+			durs.postln;
+			onsets.postln;
+
+			notes.size.do({
+				arg i;
+				file.addNote(notes[i], 64, onsets[i], durs[i], track: track + 1)
+			})
+		});
+
+		// how to get onsets...
+
+		// actually create each Pbind individually from voices.notepat and voices.durpat...
+		/*file.adjustEndOfTrack;*/
+		file.write
 	}
 
 }
@@ -131,9 +189,22 @@ Voice {
 	var <>notepat, <>durpat;
 
 	*new {
-		arg notepat, durpat;
+		arg notepat, durpat=[1];
 
-		notepat = notepat ?
+		// make sure they match first
+		if (
+			durpat.size != notepat.size,
+			{
+				durpat = notepat.size.collect({
+					arg i;
+					durpat.wrapAt(i)
+				});
+			}
+		);
+
+		durpat = Pseq(durpat);
+
+		notepat = Pseq(notepat) ?
 
 		Pseq([
 			// tallis' canon
@@ -147,7 +218,8 @@ Voice {
 			64, 62, 62, 60
 		]);
 
-		durpat = durpat ? 1;
+		// need durpat to correspond with notepat ...
+		// change Voice to handle array rather than pat?
 
 		^super.newCopyArgs(notepat, durpat)
 	}

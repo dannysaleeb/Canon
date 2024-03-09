@@ -1,0 +1,7 @@
+class:: CanonMap
+summary:: A paramater map for the Canon class
+related:: Canon
+
+Description::
+
+Parameter map for the Canon class.
